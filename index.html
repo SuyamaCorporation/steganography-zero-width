@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ゼロ幅文字 ステガノグラフィー ツール</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col items-center p-4">
+<h1 class="text-2xl font-bold mt-4 mb-1 text-cyan-300">🔏 ゼロ幅文字 ステガノグラフィー</h1>
+<p class="text-gray-400 mb-4 text-sm">ゼロ幅スペース（U+200B/200C）でテキストに隠しメッセージを埋め込む</p>
+
+<div class="flex gap-2 mb-4">
+  <button id="tabEmbed" class="bg-cyan-700 px-4 py-2 rounded font-semibold">埋め込み</button>
+  <button id="tabDetect" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded font-semibold">検出・抽出</button>
+</div>
+
+<div id="embedPanel" class="w-full max-w-2xl">
+  <div class="bg-gray-800 rounded-xl p-4 mb-4">
+    <label class="block text-sm font-semibold mb-1">カバーテキスト（隠蔽先）:</label>
+    <textarea id="coverText" rows="3" class="w-full bg-gray-700 rounded px-3 py-2 text-sm" placeholder="ここに通常のテキストを入力...">今日は良い天気ですね。外出するには絶好の日和です。</textarea>
+    <label for="secretMsg" class="block text-sm font-semibold mt-3 mb-1">隠しメッセージ:</label>
+    <input type="text" id="secretMsg" class="w-full bg-gray-700 rounded px-3 py-2 text-sm" placeholder="秘密のメッセージを入力..." value="secret">
+    <button id="btnEmbed" class="mt-3 bg-cyan-600 hover:bg-cyan-700 px-4 py-2 rounded font-semibold w-full">🔒 メッセージを埋め込む</button>
+  </div>
+
+  <div id="embedResult" class="hidden bg-gray-800 rounded-xl p-4">
+    <div class="text-sm font-semibold mb-2 text-green-400">✅ 埋め込み完了（目に見えないゼロ幅文字が含まれています）</div>
+    <label class="block text-xs text-gray-400 mb-1">出力テキスト（このテキストをコピーして共有）:</label>
+    <textarea id="outputText" rows="3" class="w-full bg-gray-700 rounded px-3 py-2 text-sm font-mono" readonly></textarea>
+    <button id="btnCopyOutput" class="mt-2 bg-gray-600 hover:bg-gray-500 px-3 py-1 rounded text-sm">コピー</button>
+
+    <div class="mt-3 bg-gray-900 rounded p-3 text-xs">
+      <div class="font-semibold text-cyan-300 mb-2">バイナリ表現:</div>
+      <div id="binaryRepr" class="font-mono text-green-400 break-all text-xs"></div>
+    </div>
+  </div>
+</div>
+
+<div id="detectPanel" class="hidden w-full max-w-2xl">
+  <div class="bg-gray-800 rounded-xl p-4 mb-4">
+    <label class="block text-sm font-semibold mb-1">調査するテキストを貼り付け:</label>
+    <textarea id="inspectText" rows="4" class="w-full bg-gray-700 rounded px-3 py-2 text-sm" placeholder="ゼロ幅文字が含まれているかもしれないテキストを貼り付け..."></textarea>
+    <button id="btnDetect" class="mt-3 bg-cyan-600 hover:bg-cyan-700 px-4 py-2 rounded font-semibold w-full">🔍 検出・抽出する</button>
+  </div>
+
+  <div id="detectResult" class="hidden bg-gray-800 rounded-xl p-4">
+    <div id="detectStatus" class="text-sm font-semibold mb-2"></div>
+    <div id="detectDetails" class="text-xs space-y-2"></div>
+  </div>
+</div>
+
+<div class="mt-4 bg-gray-800 rounded-xl p-4 w-full max-w-2xl text-sm">
+  <h3 class="font-semibold text-cyan-300 mb-2">📖 ゼロ幅文字について</h3>
+  <div class="text-gray-300 space-y-1 text-xs">
+    <p><strong>U+200B</strong>（ZERO WIDTH SPACE）= ビット 0 として使用</p>
+    <p><strong>U+200C</strong>（ZERO WIDTH NON-JOINER）= ビット 1 として使用</p>
+    <p>各文字を8ビット ASCII/UTF-8 に変換し、ゼロ幅文字として埋め込みます。視覚的には変化なし。</p>
+  </div>
+</div>
+
+<script>
+const ZW0 = '​'; // zero-width space = bit 0
+const ZW1 = '‌'; // zero-width non-joiner = bit 1
+
+function textToBits(text) {
+  const bits = [];
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    for (let b = 7; b >= 0; b--) {
+      bits.push((code >> b) & 1);
+    }
+  }
+  return bits;
+}
+
+function bitsToText(bits) {
+  let text = '';
+  for (let i = 0; i + 7 < bits.length; i += 8) {
+    const byte = bits.slice(i, i+8);
+    const code = byte.reduce((acc, bit, j) => acc + (bit << (7 - j)), 0);
+    if (code === 0) break;
+    text += String.fromCharCode(code);
+  }
+  return text;
+}
+
+function embed(cover, secret) {
+  const bits = textToBits(secret);
+  // Append end marker (8 zero bits)
+  const allBits = [...bits, ...new Array(8).fill(0)];
+  let result = cover;
+  // Insert zero-width chars after first character of cover text
+  const insertPos = Math.min(1, cover.length);
+  const zwChars = allBits.map(b => b === 0 ? ZW0 : ZW1).join('');
+  return cover.slice(0, insertPos) + zwChars + cover.slice(insertPos);
+}
+
+function extractZWBits(text) {
+  const bits = [];
+  for (const ch of text) {
+    if (ch === ZW0) bits.push(0);
+    else if (ch === ZW1) bits.push(1);
+  }
+  return bits;
+}
+
+document.getElementById('tabEmbed').addEventListener('click', () => {
+  document.getElementById('embedPanel').classList.remove('hidden');
+  document.getElementById('detectPanel').classList.add('hidden');
+  document.getElementById('tabEmbed').className = 'bg-cyan-700 px-4 py-2 rounded font-semibold';
+  document.getElementById('tabDetect').className = 'bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded font-semibold';
+});
+
+document.getElementById('tabDetect').addEventListener('click', () => {
+  document.getElementById('embedPanel').classList.add('hidden');
+  document.getElementById('detectPanel').classList.remove('hidden');
+  document.getElementById('tabDetect').className = 'bg-cyan-700 px-4 py-2 rounded font-semibold';
+  document.getElementById('tabEmbed').className = 'bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded font-semibold';
+});
+
+document.getElementById('btnEmbed').addEventListener('click', () => {
+  const cover = document.getElementById('coverText').value;
+  const secret = document.getElementById('secretMsg').value;
+  if (!cover || !secret) { alert('テキストとメッセージを入力してください'); return; }
+
+  const output = embed(cover, secret);
+  document.getElementById('outputText').value = output;
+
+  const bits = textToBits(secret);
+  const binaryStr = [];
+  for (let i = 0; i < secret.length; i++) {
+    const charBits = bits.slice(i*8, (i+1)*8).join('');
+    binaryStr.push(secret[i] + '=' + charBits);
+  }
+  document.getElementById('binaryRepr').textContent = binaryStr.join('  ');
+  document.getElementById('embedResult').classList.remove('hidden');
+});
+
+document.getElementById('btnCopyOutput').addEventListener('click', () => {
+  const text = document.getElementById('outputText').value;
+  navigator.clipboard.writeText(text).then(() => {
+    document.getElementById('btnCopyOutput').textContent = '✅ コピー完了';
+    setTimeout(() => { document.getElementById('btnCopyOutput').textContent = 'コピー'; }, 2000);
+  });
+});
+
+document.getElementById('btnDetect').addEventListener('click', () => {
+  const text = document.getElementById('inspectText').value;
+  const bits = extractZWBits(text);
+  const resultEl = document.getElementById('detectResult');
+  const statusEl = document.getElementById('detectStatus');
+  const detailsEl = document.getElementById('detectDetails');
+
+  detailsEl.innerHTML = '';
+  resultEl.classList.remove('hidden');
+
+  if (bits.length === 0) {
+    statusEl.textContent = '❌ ゼロ幅文字が見つかりません';
+    statusEl.className = 'text-sm font-semibold mb-2 text-gray-400';
+    return;
+  }
+
+  statusEl.textContent = '✅ ゼロ幅文字を検出！';
+  statusEl.className = 'text-sm font-semibold mb-2 text-green-400';
+
+  const extracted = bitsToText(bits);
+
+  const info = [
+    ['検出ビット数', bits.length + ' ビット（' + Math.floor(bits.length/8) + ' 文字分）', '#60A5FA'],
+    ['抽出テキスト', extracted || '（デコード失敗 - 別のエンコード方式かも）', '#34D399'],
+    ['ビット列（先頭64bit）', bits.slice(0,64).join('') + (bits.length > 64 ? '...' : ''), '#FCD34D'],
+    ['ゼロ幅文字内訳', 'U+200B×' + bits.filter(b=>b===0).length + ' / U+200C×' + bits.filter(b=>b===1).length, '#E5E7EB'],
+  ];
+
+  info.forEach(([label, val, color]) => {
+    const div = document.createElement('div');
+    div.className = 'bg-gray-700 rounded p-2';
+    const lbl = document.createElement('div');
+    lbl.className = 'text-gray-400 mb-0.5';
+    lbl.textContent = label;
+    const v = document.createElement('div');
+    v.className = 'font-mono font-semibold break-all';
+    v.style.color = color;
+    v.textContent = val;
+    div.appendChild(lbl);
+    div.appendChild(v);
+    detailsEl.appendChild(div);
+  });
+});
+</script>
+</body>
+</html>
